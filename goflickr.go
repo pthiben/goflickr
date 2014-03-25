@@ -67,8 +67,6 @@ func (fps *FlickrPhotoSet) InitializePhotos(fc *FlickrClient) {
 
 	var page_count = (photo_count-1)/photos_per_page + 1
 
-	fmt.Printf("requesting %v pages for %v photos in %v", page_count, photo_count, fps.ID)
-
 	for page_idx := 0; page_idx < page_count; page_idx++ {
 
 		photoset_resp := fc.Call("photosets.getPhotos", CALL_GET, "photoset_id", fps.ID, "extras", "tags",
@@ -536,7 +534,6 @@ func main() {
 
 	flag.Parse()
 
-	log.SetFlags(0)
 	var f, err = os.OpenFile("goflickr.log", os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		log.Fatalf("error opening file: %v", err)

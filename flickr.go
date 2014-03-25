@@ -15,8 +15,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/alloy-d/goauth"
 	"github.com/bitly/go-simplejson"
+	"github.com/pthiben/goauth"
 )
 
 const (

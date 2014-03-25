@@ -57,22 +57,48 @@ func NewFlickrPhotoSet() (fps *FlickrPhotoSet) {
 
 func (fps *FlickrPhotoSet) InitializePhotos(fc *FlickrClient) {
 	g_lwt_regex := regexp.MustCompile("vision:lwt=([0-9]+)")
+	g_lwt_regex2 := regexp.MustCompile("{vision}:{lwt}=([0-9]+)")
 
-	photoset_resp := fc.Call("photosets.getPhotos", CALL_GET, "photoset_id", fps.ID, "extras", "tags")
-	for _, photo_val := range photoset_resp.GetPath("photoset", "photo").MustArray() {
-		fp := new(FlickrPhoto)
-		photo_name := fetch_val(photo_val, "title")
-		fp.ID = fetch_val(photo_val, "id")
-		photo_tags := fetch_val(photo_val, "tags")
-		lwt_string := g_lwt_regex.FindStringSubmatch(photo_tags)
-		if lwt_string != nil {
-			var timestamp, _ = strconv.Atoi(lwt_string[1])
-			fp.TimeStamp = int64(timestamp)
-		} else {
-			log.Printf("couldn't find  %s in %s", g_lwt_regex.String(), photo_tags)
+	var photoset_info = fc.Call("photosets.getInfo", CALL_GET, "photoset_id", fps.ID)
+
+	var photo_count = photoset_info.GetPath("photoset", "photos").MustInt(1)
+
+	const photos_per_page = 500
+
+	var page_count = (photo_count-1)/photos_per_page + 1
+
+	fmt.Printf("requesting %v pages for %v photos in %v", page_count, photo_count, fps.ID)
+
+	for page_idx := 0; page_idx < page_count; page_idx++ {
+
+		photoset_resp := fc.Call("photosets.getPhotos", CALL_GET, "photoset_id", fps.ID, "extras", "tags",
+			"per_page", fmt.Sprint(photos_per_page), "page", fmt.Sprint(page_idx+1))
+
+		for _, photo_val := range photoset_resp.GetPath("photoset", "photo").MustArray() {
+			fp := new(FlickrPhoto)
+
+			photo_name := fetch_val(photo_val, "title")
+			fp.ID = fetch_val(photo_val, "id")
+			photo_tags := fetch_val(photo_val, "tags")
+
+			lwt_string := g_lwt_regex.FindStringSubmatch(photo_tags)
+			lwt_string2 := g_lwt_regex2.FindStringSubmatch(photo_tags)
+
+			if lwt_string != nil {
+				var timestamp, _ = strconv.Atoi(lwt_string[1])
+				fp.TimeStamp = int64(timestamp)
+			} else if lwt_string2 != nil {
+				var timestamp, _ = strconv.Atoi(lwt_string2[1])
+				fp.TimeStamp = int64(timestamp)
+			} else {
+				log.Printf("couldn't find  %s in %s", g_lwt_regex.String(), photo_tags)
+			}
+
+			fps.photos[photo_name] = append(fps.photos[photo_name], fp)
 		}
-		fps.photos[photo_name] = append(fps.photos[photo_name], fp)
+
 	}
+
 }
 
 func (fps *FlickrPhotoSet) load_failed_files(dir_name string) {
@@ -217,7 +243,7 @@ func (fb *FlickrBackr) Upload(data *FlickrUploadData) {
 		} else if response.Err.Code == 502 { // Server closed connection
 			time.Sleep(time.Duration(5) * time.Second)
 		} else { // File type unsupported:
-			panic(response.Err.Msg)
+			log.Fatal(response.Err.Msg)
 		}
 
 	}
@@ -511,6 +537,13 @@ func main() {
 	flag.Parse()
 
 	log.SetFlags(0)
+	var f, err = os.OpenFile("goflickr.log", os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+	defer f.Close()
+
+	log.SetOutput(f)
 
 	execute(target_dir, time_allowed, *dry_run, *is_sub_dir)
 

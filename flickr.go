@@ -183,21 +183,6 @@ type UploadResponse struct {
 
 // Creates a new file upload http request with optional extra params
 func newfileUploadRequest(uri string, params map[string]string, paramName, path string) (*http.Request, error, string) {
-	body := new(bytes.Buffer) // caveat IMO dont use this for large files, \
-
-	mpw := multipart.NewWriter(body)
-
-	for k, v := range params {
-		if err := mpw.WriteField(k, v); err != nil {
-			return nil, err, ""
-		}
-	}
-
-	fw, err := mpw.CreateFormFile("photo", filepath.Base(path))
-	if err != nil {
-		panic(err.Error())
-		return nil, err, ""
-	}
 
 	log.Println("Uploading " + path)
 
@@ -207,6 +192,21 @@ func newfileUploadRequest(uri string, params map[string]string, paramName, path 
 		return nil, err, ""
 	}
 	defer fd.Close()
+
+	body := &bytes.Buffer{}
+	mpw := multipart.NewWriter(body)
+
+	for k, v := range params {
+		if err := mpw.WriteField(k, v); err != nil {
+			return nil, err, ""
+		}
+	}
+
+	fw, err := mpw.CreateFormFile(paramName, filepath.Base(path))
+	if err != nil {
+		panic(err.Error())
+		return nil, err, ""
+	}
 
 	_, err = io.Copy(fw, fd)
 
@@ -231,7 +231,6 @@ func newfileUploadRequest(uri string, params map[string]string, paramName, path 
 
 	// Don't forget to set the content type, this will contain the boundary.
 	req.Header.Set("Content-Type", mpw.FormDataContentType())
-	req.Header.Add("Accept-Encoding", "identity")
 
 	return req, err, mpw.Boundary()
 }
@@ -268,11 +267,15 @@ func post_data(fc *FlickrClient, url_ string, params map[string]string, filename
 		return nil, err
 	}
 
+	//log.Printf("Msg Header:\n%v\n", req.Header)
+	//log.Printf("Msg Body:\n%v\n", to_string(req.Body))
+
 	resp, err := oauth.Send(req)
 
 	if err != nil {
-		var err_msg = fmt.Sprintf("oauth.Send failed for %v bytes\n", r.ContentLength)
-		err_msg += fmt.Sprintf("Body: %v\n", to_string(r.Body))
+		var err_msg = fmt.Sprintf("oauth.Send failed for %v bytes\n", req.ContentLength)
+		err_msg += fmt.Sprintf("Header: \n%v\n", req.Header)
+		err_msg += fmt.Sprintf("Body: \n%v\n", to_string(req.Body))
 		log.Panicf(err_msg)
 	}
 

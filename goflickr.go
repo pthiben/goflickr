@@ -544,7 +544,7 @@ func main() {
 	}
 	defer f.Close()
 
-	//log.SetOutput(f)
+	log.SetOutput(f)
 
 	execute(target_dir, time_allowed, *dry_run, *is_sub_dir)
 

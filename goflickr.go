@@ -240,8 +240,10 @@ func (fb *FlickrBackr) Upload(data *FlickrUploadData) {
 			break
 		} else if response.Err.Code == 502 { // Server closed connection
 			time.Sleep(time.Duration(5) * time.Second)
+		} else if response.Err.Code == 3 { // Possibly corrupted file
+			break
 		} else { // File type unsupported:
-			log.Fatal(response.Err.Msg)
+			log.Fatalf("goflickr Upload failed: (error code %v) : %v", response.Err.Code, response.Err.Msg)
 		}
 
 	}
@@ -257,6 +259,8 @@ func (fb *FlickrBackr) Upload(data *FlickrUploadData) {
 		fb.AddPhotoQueue <- addPhotoData
 	} else {
 		log.Printf("Upload failed for %v", data.FullPath)
+		data.PhotoSet.add_failed_file(data.PhotoName(), data.FileInfo.ModTime().Unix())
+		<-fb.DoneAddPhoto
 	}
 
 }
@@ -540,7 +544,7 @@ func main() {
 	}
 	defer f.Close()
 
-	log.SetOutput(f)
+	//log.SetOutput(f)
 
 	execute(target_dir, time_allowed, *dry_run, *is_sub_dir)
 

@@ -78,17 +78,16 @@ func (fc *FlickrClient) CallRest(js RestResult, method string, get_or_post int32
 		r, err = fc.oauth.Post(FLICKR_REST, params_map)
 		break
 	default:
-		log.Fatal(fmt.Sprintln("Unsupported Call method %d", get_or_post))
+		log.Fatal(fmt.Sprintln("goflickr Upload: Unsupported Call method %d", get_or_post))
 		break
 	}
 
 	if err != nil {
-		log.Fatal(err)
 		panic(err.Error())
 	}
 
 	if r.StatusCode != 200 {
-		log.Fatal(fmt.Sprintln("Error code %d", r.StatusCode))
+		log.Fatal(fmt.Sprintln("goflickr CallRest: Error code %d", r.StatusCode))
 		panic(fmt.Sprintln("Error code %d", r.StatusCode))
 	}
 
@@ -140,12 +139,11 @@ func (fc *FlickrClient) Call(method string, get_or_post int32, params ...string)
 	}
 
 	if err != nil {
-		log.Fatal(err)
 		panic(err.Error())
 	}
 
 	if r.StatusCode != 200 {
-		log.Fatal(fmt.Sprintln("Error code %d", r.StatusCode))
+		log.Fatal(fmt.Sprintln("goflickr Call: Error code %d", r.StatusCode))
 		panic(fmt.Sprintln("Error code %d", r.StatusCode))
 	}
 
@@ -185,32 +183,42 @@ type UploadResponse struct {
 
 // Creates a new file upload http request with optional extra params
 func newfileUploadRequest(uri string, params map[string]string, paramName, path string) (*http.Request, error, string) {
-	file, err := os.Open(path)
+	body := new(bytes.Buffer) // caveat IMO dont use this for large files, \
+
+	mpw := multipart.NewWriter(body)
+
+	for k, v := range params {
+		if err := mpw.WriteField(k, v); err != nil {
+			return nil, err, ""
+		}
+	}
+
+	fw, err := mpw.CreateFormFile("photo", filepath.Base(path))
 	if err != nil {
 		panic(err.Error())
 		return nil, err, ""
 	}
-	defer file.Close()
 
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
+	log.Println("Uploading " + path)
 
-	for key, val := range params {
-		_ = writer.WriteField(key, val)
-	}
-
-	part, err := writer.CreateFormFile(paramName, filepath.Base(path))
+	fd, err := os.Open(path)
 	if err != nil {
 		panic(err.Error())
 		return nil, err, ""
 	}
-	_, err = io.Copy(part, file)
+	defer fd.Close()
+
+	_, err = io.Copy(fw, fd)
+
+	if err == io.ErrUnexpectedEOF {
+		panic(err.Error())
+	}
 
 	if err != nil {
 		panic(err.Error())
 	}
 
-	err = writer.Close()
+	err = mpw.Close()
 	if err != nil {
 		panic(err.Error())
 	}
@@ -222,9 +230,10 @@ func newfileUploadRequest(uri string, params map[string]string, paramName, path 
 	}
 
 	// Don't forget to set the content type, this will contain the boundary.
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+	req.Header.Add("Accept-Encoding", "identity")
 
-	return req, err, writer.Boundary()
+	return req, err, mpw.Boundary()
 }
 
 func post_data(fc *FlickrClient, url_ string, params map[string]string, filename string) (r *http.Response, err error) {
@@ -259,7 +268,15 @@ func post_data(fc *FlickrClient, url_ string, params map[string]string, filename
 		return nil, err
 	}
 
-	return oauth.Send(req)
+	resp, err := oauth.Send(req)
+
+	if err != nil {
+		var err_msg = fmt.Sprintf("oauth.Send failed for %v bytes\n", r.ContentLength)
+		err_msg += fmt.Sprintf("Body: %v\n", to_string(r.Body))
+		log.Panicf(err_msg)
+	}
+
+	return resp, err
 }
 
 func to_string(ior io.ReadCloser) string {
@@ -310,7 +327,7 @@ func (fc *FlickrClient) Upload(filename string, title string, params ...string) 
 	err = xml.Unmarshal(response, &v)
 
 	if err != nil {
-		log.Fatal(err.Error())
+		panic(err.Error())
 	}
 
 	if v.Stat == "ok" {
@@ -380,7 +397,7 @@ func create_oauth(path string) *oauth.OAuth {
 	err = launch_browser_cmd.Start()
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	err = launch_browser_cmd.Wait()
@@ -408,7 +425,7 @@ func (fc *FlickrClient) validate_connectivity(o *oauth.OAuth) bool {
 	resp_stat, err := js.GetPath("stat").String()
 
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 		return false
 	}
 

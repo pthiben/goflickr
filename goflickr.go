@@ -11,21 +11,15 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 const (
-	APP_KEY              = "c021a5195dabedc5e9f4c451cf2a6f70"
-	APP_SECRET           = "ddf3cfe6d6403464"
-	APP_WEB              = "http://127.0.0.1:8088/flickr/"
-	OAUTH_FILE           = ".flickr_oauth"
-	FAILED_FILES_FILE    = ".flickr_failed"
-	QUEUE_SIZE           = 10
-	CHECK_TICKETS_PERIOD = 1
-
-	OPERATION_UPLOAD           = 0
-	OPERATION_UPDATE_TIMESTAMP = 1
+	APP_KEY           = "c021a5195dabedc5e9f4c451cf2a6f70"
+	APP_SECRET        = "ddf3cfe6d6403464"
+	APP_WEB           = "http://127.0.0.1:8088/flickr/"
+	OAUTH_FILE        = ".flickr_oauth"
+	FAILED_FILES_FILE = ".flickr_failed"
 )
 
 type FlickrPhoto struct {

@@ -83,25 +83,25 @@ func (fc *FlickrClient) CallRest(js RestResult, method string, get_or_post int32
 	}
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	if r.StatusCode != 200 {
 		log.Fatal(fmt.Sprintln("goflickr CallRest: Error code %d", r.StatusCode))
-		panic(fmt.Sprintln("Error code %d", r.StatusCode))
+		log.Panic(fmt.Sprintln("Error code %d", r.StatusCode))
 	}
 
 	response, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	err = json.Unmarshal(response, js)
 	if err != nil {
 		log.Println(err.Error())
 		log.Println(bytes.NewBuffer(response).String())
-		panic("")
+		log.Panic("")
 	}
 }
 

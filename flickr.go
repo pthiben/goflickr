@@ -139,30 +139,25 @@ func (fc *FlickrClient) Call(method string, get_or_post int32, params ...string)
 	}
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	if r.StatusCode != 200 {
 		log.Fatal(fmt.Sprintln("goflickr Call: Error code %d", r.StatusCode))
-		panic(fmt.Sprintln("Error code %d", r.StatusCode))
+		log.Panic(fmt.Sprintln("Error code %d", r.StatusCode))
 	}
 
 	response, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
-
-	// str_resp := bytes.NewBuffer(response).String()
-	// if get_or_post == CALL_POST {
-	// 	fmt.Println(str_resp)
-	// }
 
 	js, err = simplejson.NewJson(response)
 
 	if err != nil {
 		log.Fatal(err)
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	return js
@@ -184,11 +179,9 @@ type UploadResponse struct {
 // Creates a new file upload http request with optional extra params
 func newfileUploadRequest(uri string, params map[string]string, paramName, path string) (*http.Request, error, string) {
 
-	log.Println("Uploading " + path)
-
 	fd, err := os.Open(path)
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 		return nil, err, ""
 	}
 	defer fd.Close()
@@ -204,29 +197,29 @@ func newfileUploadRequest(uri string, params map[string]string, paramName, path 
 
 	fw, err := mpw.CreateFormFile(paramName, filepath.Base(path))
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 		return nil, err, ""
 	}
 
 	_, err = io.Copy(fw, fd)
 
 	if err == io.ErrUnexpectedEOF {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	err = mpw.Close()
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	req, err := http.NewRequest("POST", uri, body)
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	// Don't forget to set the content type, this will contain the boundary.
@@ -239,7 +232,7 @@ func post_data(fc *FlickrClient, url_ string, params map[string]string, filename
 	req, err, _ := newfileUploadRequest(url_, params, "photo", filename)
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 		return nil, err
 	}
 
@@ -266,9 +259,6 @@ func post_data(fc *FlickrClient, url_ string, params map[string]string, filename
 	if err != nil {
 		return nil, err
 	}
-
-	//log.Printf("Msg Header:\n%v\n", req.Header)
-	//log.Printf("Msg Body:\n%v\n", to_string(req.Body))
 
 	resp, err := oauth.Send(req)
 
@@ -309,7 +299,7 @@ func (fc *FlickrClient) Upload(filename string, title string, params ...string) 
 	r, err := post_data(fc, FLICKR_UPLOAD, params_map, filename)
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 		return v
 	}
 
@@ -324,13 +314,13 @@ func (fc *FlickrClient) Upload(filename string, title string, params ...string) 
 	// fmt.Println(str_resp)
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	err = xml.Unmarshal(response, &v)
 
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	if v.Stat == "ok" {
@@ -349,7 +339,7 @@ func (fc *FlickrClient) get_oauth_from_cache(path string) {
 	}
 
 	if fc.oauth == nil {
-		panic("")
+		log.Panic("")
 	}
 
 }
@@ -400,7 +390,7 @@ func create_oauth(path string) *oauth.OAuth {
 	err = launch_browser_cmd.Start()
 
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 
 	err = launch_browser_cmd.Wait()
@@ -428,7 +418,7 @@ func (fc *FlickrClient) validate_connectivity(o *oauth.OAuth) bool {
 	resp_stat, err := js.GetPath("stat").String()
 
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 		return false
 	}
 
@@ -451,12 +441,12 @@ func load_oauth_from_cache(path string) (out_auth *oauth.OAuth) {
 
 	fi, err := os.Open(path)
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 	// close fi on exit and check for its returned error
 	defer func() {
 		if err := fi.Close(); err != nil {
-			panic(err)
+			log.Panic(err)
 		}
 	}()
 
@@ -466,12 +456,12 @@ func load_oauth_from_cache(path string) (out_auth *oauth.OAuth) {
 
 	_, err = fi.Read(data)
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 
 	o := new(oauth.OAuth)
 	if err := json.Unmarshal(data, &o); err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 
 	return o
@@ -481,18 +471,18 @@ func save_oauth_to_cache(o *oauth.OAuth, path string) {
 	b, err := json.Marshal(o)
 
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 
 	fo, err := os.Create(path)
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 
 	// close fo on exit and check for its returned error
 	defer func() {
 		if err := fo.Close(); err != nil {
-			panic(err)
+			log.Panic(err)
 		}
 	}()
 

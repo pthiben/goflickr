@@ -37,10 +37,10 @@ type FlickrFailedFiles struct {
 }
 
 type FlickrPhotoSet struct {
-	ID                string
+	ID                string                    // Flickr ID for the photoset
 	photos            map[string][]*FlickrPhoto // We get arrays since multiple photos can have the same name (because no restriction on subdirectories)
-	path_failed_files string
-	failed_files      FlickrFailedFiles
+	path_failed_files string                    // path of the DB containing files that failed in a previous backup
+	failed_files      FlickrFailedFiles         // List of the files that are failing in this execution
 }
 
 func NewFlickrPhotoSet() (fps *FlickrPhotoSet) {
@@ -93,7 +93,7 @@ func (fps *FlickrPhotoSet) InitializePhotos(fc *FlickrClient) {
 
 }
 
-func (fps *FlickrPhotoSet) load_failed_files(dir_name string) {
+func (fps *FlickrPhotoSet) LoadFailedFiles(dir_name string) {
 	var path_failed_files = filepath.Join(dir_name, FAILED_FILES_FILE)
 	fps.path_failed_files = path_failed_files
 
@@ -114,7 +114,7 @@ func (fps *FlickrPhotoSet) load_failed_files(dir_name string) {
 	}
 }
 
-func (fps *FlickrPhotoSet) save_failed_files() {
+func (fps *FlickrPhotoSet) SaveFailedFiles() {
 	if len(fps.failed_files.Files) > 0 {
 		if file, err := os.OpenFile(fps.path_failed_files, os.O_WRONLY|os.O_CREATE, 0); err == nil {
 			defer file.Close()
@@ -126,7 +126,7 @@ func (fps *FlickrPhotoSet) save_failed_files() {
 	}
 }
 
-func (fps *FlickrPhotoSet) add_failed_file(filename string, timestamp int64) {
+func (fps *FlickrPhotoSet) AddFailedFile(filename string, timestamp int64) {
 	var failed_file = FlickrFailedFile{filename, timestamp}
 	fps.failed_files.Files = append(fps.failed_files.Files, failed_file)
 }
@@ -158,20 +158,12 @@ type FlickrBackr struct {
 	FC            *FlickrClient
 	DryRun        bool
 	photosets_ids map[string]*FlickrPhotoSet
-	time_allowed  int
-
-	AddPhotoQueue chan *FlickrAddPhotoData
-	DoneAddPhoto  chan bool
-	WGAddPhoto    sync.WaitGroup
 
 	PhotosToAdd map[string]*FlickrAddPhotoData
 	Tickets     string
 
 	StartTime       time.Time
 	AllowedDuration float64
-
-	update_timestamp int32
-	operation_type   uint32
 }
 
 func (fb *FlickrBackr) AddPhoto(data *FlickrAddPhotoData) {
@@ -191,7 +183,7 @@ func (fb *FlickrBackr) AddPhoto(data *FlickrAddPhotoData) {
 	fps.photos[photo_title] = append(fps.photos[photo_title], data.Photo)
 }
 
-func (fb *FlickrBackr) AddPhotoFromTicket(ticket_id string, photo_id string) {
+func (fb *FlickrBackr) OnPhotoUploaded(ticket_id string, photo_id string) {
 	if _, ok := fb.PhotosToAdd[ticket_id]; ok {
 		var photo_data, _ = fb.PhotosToAdd[ticket_id]
 		photo_data.Photo.ID = photo_id
@@ -199,12 +191,12 @@ func (fb *FlickrBackr) AddPhotoFromTicket(ticket_id string, photo_id string) {
 	}
 }
 
-func (fb *FlickrBackr) AddFailedPhoto(ticket_id string) {
+func (fb *FlickrBackr) OnPhotoFailed(ticket_id string) {
 	if _, ok := fb.PhotosToAdd[ticket_id]; ok {
 		var photo_data, _ = fb.PhotosToAdd[ticket_id]
 		var fps = photo_data.UploadData.PhotoSet
 		var photo_title = photo_data.UploadData.PhotoName()
-		fps.add_failed_file(photo_title, photo_data.Photo.TimeStamp)
+		fps.AddFailedFile(photo_title, photo_data.Photo.TimeStamp)
 	} else {
 		panic(fmt.Sprintf("couldn't find photo with ticket =^%v", ticket_id))
 	}
@@ -216,7 +208,6 @@ func (fb *FlickrBackr) Upload(data *FlickrUploadData) {
 
 	if fb.DryRun {
 		log.Printf("%v (%v) -> %v \n", data.FullPath, data.FileInfo.ModTime().Unix(), data.PhotoSetTitle)
-		<-fb.DoneAddPhoto
 		return
 	}
 
@@ -243,42 +234,36 @@ func (fb *FlickrBackr) Upload(data *FlickrUploadData) {
 	}
 
 	if upload_success {
-		fb.WGAddPhoto.Add(1)
 		var addPhotoData = new(FlickrAddPhotoData)
 		addPhotoData.UploadData = data
 		addPhotoData.TicketID = ticket_id
 		addPhotoData.Photo = new(FlickrPhoto)
 		addPhotoData.Photo.TimeStamp = data.FileInfo.ModTime().Unix()
-
-		fb.AddPhotoQueue <- addPhotoData
+		fb.PhotosToAdd[ticket_id] = addPhotoData
+		fb.Tickets = fb.Tickets + fmt.Sprintf("%v,", ticket_id)
 	} else {
 		log.Printf("Upload failed for %v", data.FullPath)
-		data.PhotoSet.add_failed_file(data.PhotoName(), data.FileInfo.ModTime().Unix())
-		<-fb.DoneAddPhoto
+		data.PhotoSet.AddFailedFile(data.PhotoName(), data.FileInfo.ModTime().Unix())
 	}
 
 }
 
-type TicketsData struct {
-	Complete json.Number `json:"complete"`
-	Id       string      `json:"id"`
-	PhotoId  string      `json:"photoid"`
-}
-
-type TicketsDataArray struct {
-	Tickets []TicketsData `json:"ticket"`
-}
-
 type CheckTicketsResponse struct {
-	Tickets TicketsDataArray `json:"uploader"`
-	Stat    string           `json:"stat"`
+	Tickets struct {
+		Tickets []struct {
+			Complete json.Number `json:"complete"`
+			Id       string      `json:"id"`
+			PhotoId  string      `json:"photoid"`
+		} `json:"ticket"`
+	} `json:"uploader"`
+	Stat string `json:"stat"`
 }
 
-func (fb *FlickrBackr) ProcessCurrentTickets() {
-	time.Sleep(time.Duration(CHECK_TICKETS_PERIOD) * time.Second)
+// Returns if there are remaining tickets to process
+func (fb *FlickrBackr) ProcessCurrentTickets() bool {
 
 	if fb.Tickets == "" {
-		return
+		return false
 	}
 
 	var resp CheckTicketsResponse
@@ -286,7 +271,7 @@ func (fb *FlickrBackr) ProcessCurrentTickets() {
 		"tickets", fb.Tickets)
 
 	if resp.Stat != "ok" {
-		return
+		return false
 	}
 
 	for _, ticket := range resp.Tickets.Tickets {
@@ -297,30 +282,17 @@ func (fb *FlickrBackr) ProcessCurrentTickets() {
 		}
 
 		if ticket_complete == 1 {
-			fb.AddPhotoFromTicket(ticket.Id, ticket.PhotoId)
+			fb.OnPhotoUploaded(ticket.Id, ticket.PhotoId)
 		} else if ticket_complete == 2 {
 			// Something went wrong with the file, don't process it again on next run
-			fb.AddFailedPhoto(ticket.Id)
+			fb.OnPhotoFailed(ticket.Id)
 		}
 
 		fb.Tickets = strings.Replace(fb.Tickets, ticket.Id+",", "", 1)
 		delete(fb.PhotosToAdd, ticket.Id)
-		<-fb.DoneAddPhoto
-		fb.WGAddPhoto.Done()
 	}
-}
 
-func (fb *FlickrBackr) FlickrCheckTicketsQueue() {
-	for {
-		select {
-		case new_data := <-fb.AddPhotoQueue:
-			fb.PhotosToAdd[new_data.TicketID] = new_data
-			fb.Tickets = fb.Tickets + fmt.Sprintf("%v,", new_data.TicketID)
-		default:
-			fb.ProcessCurrentTickets()
-		}
-
-	}
+	return fb.Tickets != ""
 }
 
 func fetch_val(json_val interface{}, params ...string) string {
@@ -355,28 +327,24 @@ func NewFlickrBackr(time_allowed int, dry_run bool) (fb *FlickrBackr) {
 	}
 
 	fb.DryRun = dry_run
-	fb.time_allowed = time_allowed
 
 	fb.photosets_ids = make(map[string]*FlickrPhotoSet)
 	fb.populate_photosets()
 
-	fb.DoneAddPhoto = make(chan bool, QUEUE_SIZE)
-	fb.AddPhotoQueue = make(chan *FlickrAddPhotoData, QUEUE_SIZE)
 	fb.PhotosToAdd = make(map[string]*FlickrAddPhotoData)
 
 	fb.StartTime = time.Now()
 	fb.AllowedDuration = float64(time_allowed)
-	fb.operation_type = OPERATION_UPLOAD
 
 	return fb
 }
 
-func check_file_extension(filename string) (bool, string) {
+func CheckFileExtension(filename string) (bool, string) {
 	mime_type := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
 	return strings.HasPrefix(mime_type, "image/") || strings.HasPrefix(mime_type, "video/"), mime_type
 }
 
-func (fps *FlickrPhotoSet) file_exists_on_flickr(target_file os.FileInfo, dry_run bool) bool {
+func (fps *FlickrPhotoSet) FileExistsOnFlickr(target_file os.FileInfo, dry_run bool) bool {
 	photo_name := get_file_no_ext(target_file.Name())
 
 	var dates = "("
@@ -396,41 +364,41 @@ func (fps *FlickrPhotoSet) file_exists_on_flickr(target_file os.FileInfo, dry_ru
 	return false
 }
 
-func (fb *FlickrBackr) upload_photo_to_flickr(photo_path string, target_file os.FileInfo, fps *FlickrPhotoSet, photoset_name string) bool {
-	fb.DoneAddPhoto <- false
-	fud := new(FlickrUploadData)
-	fud.FullPath = photo_path
-	fud.FileInfo = target_file
-	fud.PhotoSet = fps
-	fud.PhotoSetTitle = photoset_name
-	fb.Upload(fud)
+func (fb *FlickrBackr) UploadPhotoToFlickr(photo_path string, target_file os.FileInfo, fps *FlickrPhotoSet, photoset_name string) bool {
+
+	fud := FlickrUploadData{
+		FullPath:      photo_path,
+		FileInfo:      target_file,
+		PhotoSet:      fps,
+		PhotoSetTitle: photoset_name,
+	}
+
+	fb.Upload(&fud)
 	return true
 }
 
-type Tag struct {
-	ID  string `json:"id"`
-	Raw string `json:"raw"`
-}
+func (fb *FlickrBackr) ProcessPhoto(photo_path string, target_file os.FileInfo, fps *FlickrPhotoSet, photoset_name string) bool {
 
-func (fb *FlickrBackr) process_photo(photo_path string, target_file os.FileInfo, fps *FlickrPhotoSet, photoset_name string) bool {
+	fb.ProcessCurrentTickets()
+
 	if time.Now().Sub(fb.StartTime).Minutes() >= fb.AllowedDuration {
 		log.Printf("out of time, aborting")
 		return false
 	}
 
-	if is_supported, _ := check_file_extension(target_file.Name()); is_supported == false {
+	if is_supported, _ := CheckFileExtension(target_file.Name()); is_supported == false {
 		return true
 	}
 
-	if fps.file_exists_on_flickr(target_file, fb.DryRun) {
+	if fps.FileExistsOnFlickr(target_file, fb.DryRun) {
 		return true
 	}
 
-	fb.upload_photo_to_flickr(photo_path, target_file, fps, photoset_name)
+	fb.UploadPhotoToFlickr(photo_path, target_file, fps, photoset_name)
 	return true
 }
 
-func process_directory(fb *FlickrBackr, target_dir string, set_name string, fps *FlickrPhotoSet) bool {
+func ProcessDirectory(fb *FlickrBackr, target_dir string, set_name string, fps *FlickrPhotoSet) bool {
 
 	log.Printf("%s", target_dir)
 
@@ -451,11 +419,11 @@ func process_directory(fb *FlickrBackr, target_dir string, set_name string, fps 
 	for idx := range dir_res {
 		full_name := filepath.Join(clean_target_dir, dir_res[idx].Name())
 		if dir_res[idx].IsDir() {
-			if !process_directory(fb, full_name, set_name, fps) {
+			if !ProcessDirectory(fb, full_name, set_name, fps) {
 				return false
 			}
 		} else {
-			if !fb.process_photo(full_name, dir_res[idx], fps, set_name) {
+			if !fb.ProcessPhoto(full_name, dir_res[idx], fps, set_name) {
 				return false
 			}
 		}
@@ -474,26 +442,36 @@ func (fb *FlickrBackr) InitPhotoSet(set_name string, dir_name string) *FlickrPho
 		fps.InitializePhotos(fb.FC)
 	}
 
-	fps.load_failed_files(dir_name)
+	fps.LoadFailedFiles(dir_name)
 
 	return fps
 }
 
+func (fb *FlickrBackr) WaitForUploadingPhotos() {
+
+	for {
+
+		if fb.ProcessCurrentTickets() == false {
+			break
+		}
+
+		time.Sleep(time.Duration(1) * time.Second)
+	}
+}
+
 func (fb *FlickrBackr) ReleasePhotoSet(fps *FlickrPhotoSet) {
-	fb.WGAddPhoto.Wait()
-	fps.save_failed_files()
+	fb.WaitForUploadingPhotos()
+	fps.SaveFailedFiles()
 }
 
 func execute(target_dir string, time_allowed int, dry_run bool, is_sub_dir bool) {
 
 	fb := NewFlickrBackr(time_allowed, dry_run)
 
-	go fb.FlickrCheckTicketsQueue()
-
 	if is_sub_dir {
 		var set_name = filepath.Base(target_dir)
 		fps := fb.InitPhotoSet(set_name, target_dir)
-		process_directory(fb, target_dir, set_name, fps)
+		ProcessDirectory(fb, target_dir, set_name, fps)
 		fb.ReleasePhotoSet(fps)
 	} else {
 		clean_target_dir, _ := filepath.Abs(target_dir)
@@ -510,7 +488,7 @@ func execute(target_dir string, time_allowed int, dry_run bool, is_sub_dir bool)
 			if dir_res[idx].IsDir() {
 				var set_name = filepath.Base(full_name)
 				fps := fb.InitPhotoSet(set_name, full_name)
-				if !process_directory(fb, full_name, set_name, fps) {
+				if !ProcessDirectory(fb, full_name, set_name, fps) {
 					fb.ReleasePhotoSet(fps)
 					break
 				}
@@ -532,7 +510,7 @@ func main() {
 
 	flag.Parse()
 
-	var f, err = os.OpenFile("goflickr.log", os.O_RDWR|os.O_CREATE, 0666)
+	var f, err = os.OpenFile("goflickr.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("error opening file: %v", err)
 	}

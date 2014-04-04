@@ -211,6 +211,8 @@ func newfileUploadRequest(uri string, params map[string]string, paramName, path 
 		log.Panic(err.Error())
 	}
 
+	var contentType = mpw.FormDataContentType()
+
 	err = mpw.Close()
 	if err != nil {
 		log.Panic(err.Error())
@@ -223,7 +225,7 @@ func newfileUploadRequest(uri string, params map[string]string, paramName, path 
 	}
 
 	// Don't forget to set the content type, this will contain the boundary.
-	req.Header.Set("Content-Type", mpw.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
 
 	return req, err, mpw.Boundary()
 }
@@ -240,7 +242,6 @@ func post_data(fc *FlickrClient, url_ string, params map[string]string, filename
 
 	var _, oauth_params = fc.oauth.MakeParams(url_, oauth_gen_params)
 
-	req.Close = true
 	req.Header.Set("Authorization", "OAuth ")
 
 	req.TransferEncoding = []string{"chunked"}
@@ -262,17 +263,20 @@ func post_data(fc *FlickrClient, url_ string, params map[string]string, filename
 
 	resp, err := oauth.Send(req)
 
+	req.Close = true
+
 	if err != nil {
 		var err_msg = fmt.Sprintf("oauth.Send failed for %v bytes\n", req.ContentLength)
-		err_msg += fmt.Sprintf("Header: \n%v\n", req.Header)
-		err_msg += fmt.Sprintf("Body: \n%v\n", to_string(req.Body))
-		log.Panicf(err_msg)
+		//err_msg += fmt.Sprintf("Header: \n%v\n", req.Header)
+		//err_msg += fmt.Sprintf("Body: \n%v\n", to_string(req.Body))
+		err_msg += fmt.Sprintf("Request: \n%+v\n", req)
+		log.Panic(err_msg)
 	}
 
 	return resp, err
 }
 
-func to_string(ior io.ReadCloser) string {
+func to_string(ior io.Reader) string {
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(ior)
 	return buf.String()
@@ -299,7 +303,8 @@ func (fc *FlickrClient) Upload(filename string, title string, params ...string) 
 	r, err := post_data(fc, FLICKR_UPLOAD, params_map, filename)
 
 	if err != nil {
-		log.Panic(err.Error())
+		log.Println(err.Error())
+		v.Err.Code = 3
 		return v
 	}
 
